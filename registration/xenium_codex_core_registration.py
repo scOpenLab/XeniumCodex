@@ -17,6 +17,8 @@ import cv2 as cv
 import pandas as pd
 import spatialdata as sd
 import spatialdata_io
+import tifffile
+import zarr
 from spatialdata.models import Image2DModel
 
 
@@ -48,8 +50,8 @@ def get_align_matrix(img1, img2, scale_factor=1):
     sift = cv.SIFT_create()
     kp1, des1 = sift.detectAndCompute(img1, None)
     kp2, des2 = sift.detectAndCompute(img2, None)
-    FLANN_INDEX_KDTREE = 1
-    index_params = {"algorithm": FLANN_INDEX_KDTREE, "trees": 5}
+
+    index_params = {"algorithm": 1, "trees": 5}  #  FLANN_INDEX_KDTREE = 1
     search_params = {"checks": 50}
     flann = cv.FlannBasedMatcher(index_params, search_params)
     matches = flann.knnMatch(des1, des2, k=2)
@@ -96,17 +98,13 @@ def get_align_matrix(img1, img2, scale_factor=1):
 def get_arguments():
     """
     Parses and checks command line arguments, and provides an help text.
-    Assumes 6 and returns 6 positional command line arguments:
+    Assumes 5 and returns 5 positional command line arguments:
     """
     parser = argparse.ArgumentParser(
         description="Aligns CODEX to Xenium and saves SpatialData objects"
     )
     parser.add_argument("xenium_folder", help="path to the xenium folder")
-    parser.add_argument(
-        "xenium_zarr",
-        help="path to the xenium morphology focus DAPI image in OME-NGFF format",
-    )
-    parser.add_argument("codex_zarr", help="path to the CODEX image in OME-NGFF format")
+    parser.add_argument("codex_tiff", help="path to the CODEX image in tiff format")
     parser.add_argument(
         "codex_channels", help="path to the txt file with the list of codex channels"
     )
@@ -115,8 +113,7 @@ def get_arguments():
     args = parser.parse_args()
     return (
         args.xenium_folder,
-        args.xenium_zarr,
-        args.codex_zarr,
+        args.codex_tiff,
         args.codex_channels,
         args.bounding_boxes,
         args.output_folder,
@@ -192,22 +189,29 @@ def save_crop(index, bounding_boxes, cropped_xenium, out_folder):
     """
     Writes "{output_folder}/core-{int(bboxes.loc[index].core_id)}.zarr"
     """
-    cropped_xenium.write(
-        f"{out_folder}/core-{int(bounding_boxes.loc[index].core_id)}.zarr",
-        overwrite=True,
-        consolidate_metadata=True,
-    )
+    try:
+        cropped_xenium.write(
+            f"{out_folder}/core-{int(bounding_boxes.loc[index].core_id)}.zarr",
+            overwrite=True,
+            consolidate_metadata=True,
+        )
+    except AttributeError as err:
+        print(err)
 
 
 if __name__ == "__main__":
     (
         xenium_folder,
-        xenium_zarr,
-        codex_zarr,
+        codex_tiff,
         codex_channels_path,
         bounding_boxes_path,
         output_folder,
     ) = get_arguments()
+
+    # Builds the path to the morphology focus images
+    xenium_morphology_path = (
+        xenium_folder + "/morphology_focus/morphology_focus_0000.ome.tif"
+    )
 
     FIRST_SCALE_FACTOR = 8
     SECOND_SCALE_FACTOR = 2
@@ -290,8 +294,9 @@ if __name__ == "__main__":
 
     # Read the codex image converted to zarr as:
     print("Reading CODEX image")
-    cx_img = dask.array.from_zarr(codex_zarr, component="0/0")
-    cx_img = cx_img.squeeze()
+    cx_img = tifffile.imread(codex_tiff, aszarr=True)
+    cx_img = zarr.open(cx_img, mode="r")
+    cx_img = dask.array.from_zarr(cx_img[0])
     cx_img = np.flip(cx_img, (1, 2))
     # Read the CODEX channel list
     print("Reading CODEX channel list")
@@ -301,8 +306,9 @@ if __name__ == "__main__":
     # Read one of the xenium morphology focus images as zarr:
     print("Reading xenium morphology focus")
     mf_channels = ["DAPI", "ATP1A1/CD45/E-Cadherin", "18S", "alphaSMA/Vimentin"]
-    mf_img = dask.array.from_zarr(xenium_zarr, component="0/0")
-    mf_img = mf_img.squeeze()
+    mf_img = tifffile.imread(xenium_morphology_path, aszarr=True)
+    mf_img = zarr.open(mf_img, mode="r")
+    mf_img = dask.array.from_zarr(mf_img)
 
     # First round for a coarse registration, allows to crop the CODEX using Xenium cooordinates
     # Downscaling CODEX DAPI
