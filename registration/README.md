@@ -160,8 +160,7 @@ These outputs retain the same structure as the original `SpatialData` object.
 ```
 python3 xenium_codex_core_registration.py \
  <xenium_folder> \
- <xenium_zarr> \
- <codex_zarr> \
+ <codex_tiff> \
  <codex_channels.txt> \
  <bounding_boxes> \
  <output_path>
