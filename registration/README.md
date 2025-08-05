@@ -1,13 +1,19 @@
 # CODEX to Xenium Registration Tools
 
+There are 2 registration workflows:
+- Registration on the whole slide
+- Registration by core
+
+
+## Registration on the whole slide:
 - XeniumCodexRegistrator.py
 - RegisteredCoreSplitter.py
 
-## XeniumCodexRegistrator.py
+### XeniumCodexRegistrator.py
 
 This script aligns a CODEX image with a Xenium spatial transcriptomics dataset and saves the result as a [`SpatialData`](https://spatialdata.scverse.org/) object, with the registered CODEX image and filtered Xenium transcript table.
 
-### Usage
+#### Usage
 
 ```bash
 python3 XeniumCodexRegistrator.py \
@@ -26,7 +32,7 @@ python3 XeniumCodexRegistrator.py \
 | `codex_channels.txt` | Text file listing CODEX channel names, one per line              |
 | `output_path`        | Output path where the `SpatialData` Zarr will be saved           |
 
-### Workflow
+#### Workflow
 
 1. **Image Loading**
    CODEX and Xenium DAPI images are loaded and processed using `dask.array`.
@@ -66,7 +72,7 @@ The following columns are removed:
 7. **Output**
    The resulting `SpatialData` object is saved to the specified `output_path`.
 
-### Output
+#### Output
 
 The output is a single `SpatialData` object, with associated Zarr store: 
 ```
@@ -93,12 +99,12 @@ The object contains two coordinate spaces:
 - "global": Xenium + aligned codex data (this should be used for visualization)
 
 
-## RegisteredCoreSplitter.py
+### RegisteredCoreSplitter.py
 
 This script crops an aligned Xenium `SpatialData` object generated with the previous script,
 into multiple subregions based on bounding boxes provided in a CSV file. Each cropped region is written as an individual `.zarr` dataset using the same structure as the original input.
 
-### Usage
+#### Usage
 
 ```bash
 python3 RegisteredCoreSplitter.py \
@@ -124,7 +130,7 @@ core_id,x_min,x_max,y_min,y_max
 - Pixel coordinates are assumed to be in **micrometers** and to apply to the Xenium morphology focus DAPI image and will be converted to pixel units (1 px = 212 nm).
 - Each row defines one rectangular crop region.
 
-### Workflow
+#### Workflow
 
 1. **Load Data**  
    Read the full `SpatialData` object from the specified `input_folder`.
@@ -138,12 +144,82 @@ core_id,x_min,x_max,y_min,y_max
    - Rechunk the image and label data for efficient storage.
    - Save the cropped region to a `.zarr` file named `core-<core_id>.zarr` in the `output_folder`.
 
-### Output
+#### Output
 
 Each cropped dataset will be saved in the `output_folder` as:
 
 ```
 core-<core_id>.zarr
 ```
-
 These outputs retain the same structure as the original `SpatialData` object.
+
+
+### Registration by core
+
+#### Usage
+```
+python3 xenium_codex_core_registration.py \
+ <xenium_folder> \
+ <xenium_zarr> \
+ <codex_zarr> \
+ <codex_channels.txt> \
+ <bounding_boxes> \
+ <output_path>
+```
+
+#### Workflow
+
+1. **Xenium data loading**
+   Load the transcripts, cell mask, feature matrix and cell boundaries. Nuclei are skipped.
+
+2. **Transcript Table Cleanup**
+The following probes/codewords are removed:
+- "deprecated_codeword"
+- "negative_control_probe"
+- "genomic_control_probe"
+- "negative_control_codeword"
+- "unassigned_codeword"
+
+3. **Image Loading**
+   CODEX and Xenium DAPI images are loaded and processed using `dask.array`.
+
+4. **Downscaling**
+   Both images are downscaled to fit into memory for SIFT landmark detection (8X).
+
+5. **Image Registration**
+  First coarse image registration on the whole slide:
+   * SIFT keypoints are computed with OpenCV.
+   * Keypoint matches are filtered using Lowe’s ratio test (0.4).
+   * An affine transformation is estimated from matched points and rescaled up (8X).
+
+6. **Cropping and fine registration**
+   The images and xenium data are cropped, then both images are downscaled to fit into memory for SIFT landmark detection (2X).
+   * SIFT keypoints are computed with OpenCV.
+   * Keypoint matches are filtered using Lowe’s ratio test (0.5).
+   * An affine transformation is estimated from matched points and rescaled up (2X).
+
+7. **SpatialData Integration**
+   The CODEX and Xenium images are added to the Xenium `SpatialData` object.
+
+8. **Output**
+   The resulting `SpatialData` object is saved to the specified `output_path`.
+
+#### Output
+
+The output is a single `SpatialData` object for each core, with its associated Zarr store: 
+```
+├── Images
+│     ├── 'codex': DataTree[cyx] (multiple resolutions)
+│     └── 'morphology_focus': DataTree[cyx] (multiple resolutions)
+├── Labels
+│     └── 'cell_labels': DataTree[yx] (multiple resolutions)
+├── Points
+│     └── 'transcripts': DataFrame with shape: (<Delayed>, 5) (2D points)
+├── Shapes
+│     └── 'cell_boundaries': GeoDataFrame shape: (N cells, 1) (2D shapes)
+└── Tables
+      └── 'table': AnnData (N cells, N features)
+with coordinate systems:
+  ▸ 'global', with elements:
+    codex (Images), morphology_focus (Images), cell_labels (Labels), transcripts (Points), cell_boundaries (Shapes)
+```
