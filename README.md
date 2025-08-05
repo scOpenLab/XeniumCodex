@@ -30,4 +30,11 @@ Scripts at: Napari_UI_scripts(https://github.com/scOpenLab/XeniumCodex/tree/main
 With these you can select both single-channels for the CODEX and single transcripts for the Xenium.
 It's not ideal having to copy them to the Napari console, but we could turn them into something more polished later.
 
+napari-spatialdata downsamples point layers by default to 100.000 points, which is too sparse for this use case: https://github.com/scverse/napari-spatialdata/blob/aea2eb559c536aae64ba1a57dc71d26c2c66db28/src/napari_spatialdata/constants/config.py#L2
+We can load and view all the transcripts, by overwriting the limit before we load the core into napari, by using the console window and these lines:
+```
+import napari_spatialdata
+napari_spatialdata.constants.config.POINT_THRESHOLD = 10**9 # A billion here is just an example, any large number is fine.
+```
+
 See detailed instructions at: [Napari_UI_scripts/README.md](https://github.com/scOpenLab/XeniumCodex/blob/main/Napari_UI_scripts/README.md)
